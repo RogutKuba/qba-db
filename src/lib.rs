@@ -168,7 +168,6 @@ impl Db {
 
             match page_opt {
                 Some(page) => {
-                    info!("writing full page {} to disk", i);
                     // if pages are full write all to disk
                     match self
                         .table
@@ -194,7 +193,6 @@ impl Db {
 
             match page_opt {
                 Some(page) => {
-                    info!("writing partial page {} to disk", num_full_pages);
                     let bytes_to_write = remaining_rows * ROW_SIZE;
 
                     match self
@@ -271,6 +269,7 @@ fn execute_statement(statement: Statement, table: &mut Table) {
         StatementType::Select => execute_select_statement(statement, table).unwrap(),
         StatementType::Insert => execute_insert_statement(statement, table).unwrap(),
     }
+    println!();
 }
 
 fn execute_select_statement(_: Statement, table: &mut Table) -> Result<(), &'static str> {
@@ -329,7 +328,7 @@ fn get_table_row(table: &mut Table, row_num: u32) -> Result<*mut u8, &str> {
             //     page.as_ptr(),
             //     row_num
             // );
-            return Ok(page.add(ROW_SIZE * row_num as usize));
+            return Ok(page.add(ROW_SIZE * (row_num % ROWS_PER_PAGE) as usize));
         },
         Err(_) => return Err("Error fetching page from table"),
     }
@@ -376,17 +375,23 @@ unsafe fn unsafe_serialize_row(source: &Row, destination: *mut u8) -> Result<(),
         return Err("Email is too long!");
     }
     let email_bytes = source.email.as_bytes();
-    // info!(
-    //     "Saving bytes: {:?} to destination {:?}",
-    //     email_bytes,
-    //     destination.offset(EMAIL_OFFSET as isize)
-    // );
-    std::ptr::write_bytes(destination.offset(EMAIL_OFFSET as isize), 0, EMAIL_SIZE);
+    std::ptr::write_bytes(destination.offset(EMAIL_OFFSET as isize), 0u8, EMAIL_SIZE);
     std::ptr::copy_nonoverlapping(
         email_bytes.as_ptr(),
         destination.offset(EMAIL_OFFSET as isize),
         email_bytes.len(),
     );
+
+    // info!();
+    // println!("[EMAIL]: now going to read what we just wrote!");
+    // let email_slice =
+    //     std::slice::from_raw_parts(destination.offset(EMAIL_OFFSET as isize), EMAIL_SIZE);
+    // println!(
+    //     "[EMAIL]: Reading bytes: from source {:?} with len {}. bytes are {:?}",
+    //     destination.offset(EMAIL_OFFSET as isize),
+    //     EMAIL_SIZE,
+    //     email_slice
+    // );
 
     Ok(())
 }
@@ -403,11 +408,6 @@ unsafe fn unsafe_deserialize_row(source: *const u8, destination: &mut Row) -> Re
 
     // SAFER: Deserialize EMAIL
     let email_slice = std::slice::from_raw_parts(source.offset(EMAIL_OFFSET as isize), EMAIL_SIZE);
-    // info!(
-    //     "Reading bytes: from source {:?}. bytes are {:?}",
-    //     source.offset(EMAIL_OFFSET as isize),
-    //     email_slice
-    // );
     let email = std::str::from_utf8(email_slice).unwrap().to_string();
 
     destination.id = id;

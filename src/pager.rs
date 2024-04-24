@@ -4,6 +4,8 @@ use std::{
     path::Path,
 };
 
+use log::info;
+
 pub const PAGE_SIZE: usize = 4096;
 pub const TABLE_MAX_PAGES: usize = 100;
 
@@ -58,12 +60,11 @@ impl Pager {
         match self.pages.get_mut(page_num) {
             Some(page_opt) => {
                 match page_opt {
-                    Some(page) => return Ok(page.as_mut_ptr()),
+                    Some(page) => {
+                        info!("Page was loaded from cache");
+                        return Ok(page.as_mut_ptr());
+                    }
                     None => {
-                        // println!(
-                        //     "Loading page {} from memory as was not cached {}",
-                        //     page_num, PAGE_SIZE
-                        // );
                         // need to load from memory
                         let mut allocated = vec![0u8; PAGE_SIZE];
 
@@ -78,7 +79,6 @@ impl Pager {
                         // );
 
                         if page_num < file_pages {
-                            // println!("Page in inside file! loading from file");
                             match self
                                 .file_descriptor
                                 .seek(std::io::SeekFrom::Start((page_num * PAGE_SIZE) as u64))
@@ -92,21 +92,22 @@ impl Pager {
                             }
                         } else if page_num == file_pages {
                             // check for partial page
-
                             let partial_page_length =
                                 (self.file_length % PAGE_SIZE as u64) as usize;
 
-                            match self
-                                .file_descriptor
-                                .seek(std::io::SeekFrom::Start((page_num * PAGE_SIZE) as u64))
-                            {
-                                Ok(_) => {
-                                    // save buffer in pages
-                                    self.file_descriptor
-                                        .read_exact(&mut allocated[0..partial_page_length])
-                                        .unwrap();
+                            if partial_page_length > 0 {
+                                match self
+                                    .file_descriptor
+                                    .seek(std::io::SeekFrom::Start((page_num * PAGE_SIZE) as u64))
+                                {
+                                    Ok(_) => {
+                                        // save buffer in pages
+                                        self.file_descriptor
+                                            .read_exact(&mut allocated[0..partial_page_length])
+                                            .unwrap();
+                                    }
+                                    Err(_) => return Err("Error trying to reach page from file"),
                                 }
-                                Err(_) => return Err("Error trying to reach page from file"),
                             }
                         }
 
@@ -117,5 +118,13 @@ impl Pager {
             }
             None => Err("Error fetching page from pager"),
         }
+    }
+}
+
+impl Drop for Pager {
+    fn drop(&mut self) {
+        // No need to explicitly drop Vec<u8>, Rust will drop it automatically.
+        // Just handle cleanup necessary for the file or other resources.
+        println!("Cleaning up Pager resources");
     }
 }
