@@ -61,7 +61,6 @@ impl Pager {
             Some(page_opt) => {
                 match page_opt {
                     Some(page) => {
-                        info!("Page was loaded from cache");
                         return Ok(page.as_mut_ptr());
                     }
                     None => {
@@ -118,13 +117,5 @@ impl Pager {
             }
             None => Err("Error fetching page from pager"),
         }
-    }
-}
-
-impl Drop for Pager {
-    fn drop(&mut self) {
-        // No need to explicitly drop Vec<u8>, Rust will drop it automatically.
-        // Just handle cleanup necessary for the file or other resources.
-        println!("Cleaning up Pager resources");
     }
 }

@@ -1,6 +1,8 @@
 // module imports
+mod cursor;
 mod pager;
 
+use cursor::Cursor;
 use log::info;
 
 use std::io::{stdin, stdout, Write};
@@ -273,8 +275,11 @@ fn execute_statement(statement: Statement, table: &mut Table) {
 }
 
 fn execute_select_statement(_: Statement, table: &mut Table) -> Result<(), &'static str> {
-    for i in 0..table.num_rows {
-        let row_slot = get_table_row(table, i).unwrap();
+    let mut cursor = Cursor::table_start(table);
+    let mut end_of_table = cursor.end_of_table;
+
+    while end_of_table == false {
+        let row_slot = Cursor::get_cursor_value(&mut cursor).unwrap();
 
         let mut row_data = Row {
             id: 123,
@@ -284,9 +289,12 @@ fn execute_select_statement(_: Statement, table: &mut Table) -> Result<(), &'sta
         deserialize_row(row_slot, &mut row_data).unwrap();
 
         info!(
-            "Row {}, id: {}, username: {}, email: {}",
-            i, row_data.id, row_data.username, row_data.email
+            "id: {}, username: {}, email: {}",
+            row_data.id, row_data.username, row_data.email
         );
+
+        cursor.advance_cursor();
+        end_of_table = cursor.end_of_table;
     }
 
     Ok(())
@@ -295,7 +303,10 @@ fn execute_select_statement(_: Statement, table: &mut Table) -> Result<(), &'sta
 fn execute_insert_statement(statement: Statement, table: &mut Table) -> Result<(), &'static str> {
     // insert from statement into table page
     let num_rows = table.num_rows;
-    let row_slot = get_table_row(table, num_rows).unwrap();
+    let mut cursor = Cursor::table_end(table);
+
+    // let row_slot = get_table_row(table, num_rows).unwrap();
+    let row_slot = Cursor::get_cursor_value(&mut cursor).unwrap();
     table.num_rows = num_rows + 1;
 
     match serialize_row(&statement.row_to_insert, row_slot) {
@@ -307,31 +318,6 @@ fn execute_insert_statement(statement: Statement, table: &mut Table) -> Result<(
     }
 
     Ok(())
-}
-
-fn get_table_row(table: &mut Table, row_num: u32) -> Result<*mut u8, &str> {
-    let page_num: usize = (row_num / ROWS_PER_PAGE) as usize;
-    // info!("total pages: {}", table.pages.len());
-
-    if page_num > TABLE_MAX_PAGES as usize {
-        return Err("Trying to fetch from page out of bounds!");
-    }
-
-    let cur_page = table.pager.get_page(page_num);
-
-    // info!("fetching from pages {}", page_num);
-
-    match cur_page {
-        Ok(page) => unsafe {
-            // info!(
-            //     "Has page at address: {:?}. Adding {} rows",
-            //     page.as_ptr(),
-            //     row_num
-            // );
-            return Ok(page.add(ROW_SIZE * (row_num % ROWS_PER_PAGE) as usize));
-        },
-        Err(_) => return Err("Error fetching page from table"),
-    }
 }
 
 fn serialize_row(source: &Row, destination: *mut u8) -> Result<(), &str> {
