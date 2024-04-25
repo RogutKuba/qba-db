@@ -1,4 +1,4 @@
-use qba_db::Db;
+use qba_db::db::Db;
 
 fn main() {
     std::env::set_var("RUST_LOG", "info");

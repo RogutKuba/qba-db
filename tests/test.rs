@@ -1,4 +1,4 @@
-use qba_db::Db;
+use qba_db::db::Db;
 
 #[cfg(test)]
 mod tests {

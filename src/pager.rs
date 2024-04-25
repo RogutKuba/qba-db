@@ -6,13 +6,16 @@ use std::{
 
 use log::info;
 
+use crate::tree::LeafNode;
+
 pub const PAGE_SIZE: usize = 4096;
 pub const TABLE_MAX_PAGES: usize = 100;
 
 pub struct Pager {
     pub file_descriptor: File,
     pub file_length: u64,
-    pub pages: Vec<Option<Vec<u8>>>,
+    pub num_pages: u32,
+    pub pages: Vec<Option<Box<LeafNode>>>,
 }
 
 impl Pager {
@@ -28,11 +31,17 @@ impl Pager {
             {
                 Ok(file) => {
                     let meta = file.metadata().unwrap();
-                    let pages: Vec<Option<Vec<u8>>> = vec![None; TABLE_MAX_PAGES];
+                    let pages: Vec<Option<Box<LeafNode>>> = vec![None; TABLE_MAX_PAGES];
+                    let file_length = meta.len();
+
+                    if file_length % PAGE_SIZE as u64 != 0 {
+                        return Err("Db file length is not a valid number of pages. Corrupt file");
+                    }
 
                     return Ok(Pager {
                         file_descriptor: file,
-                        file_length: meta.len(),
+                        file_length,
+                        num_pages: (file_length as usize / PAGE_SIZE) as u32,
                         pages,
                     });
                 }
@@ -41,81 +50,73 @@ impl Pager {
         } else {
             let file = File::create_new(file_path).unwrap();
             let meta = file.metadata().unwrap();
-            let pages: Vec<Option<Vec<u8>>> = vec![None; TABLE_MAX_PAGES];
+            let pages: Vec<Option<Box<LeafNode>>> = vec![None; TABLE_MAX_PAGES];
 
             return Ok(Pager {
                 file_descriptor: file,
                 file_length: meta.len(),
+                num_pages: 0,
                 pages,
             });
         }
     }
 
-    pub fn get_page(&mut self, page_num: usize) -> Result<*mut u8, &str> {
+    pub fn get_page<'a>(&'a mut self, page_num: usize) -> Result<&'a mut LeafNode, &'a str> {
         if page_num > TABLE_MAX_PAGES {
             return Err("Hit page limit for table");
         }
 
-        // check if we already loaded this page
-        match self.pages.get_mut(page_num) {
-            Some(page_opt) => {
-                match page_opt {
-                    Some(page) => {
-                        return Ok(page.as_mut_ptr());
-                    }
-                    None => {
-                        // need to load from memory
-                        let mut allocated = vec![0u8; PAGE_SIZE];
+        if self.pages[page_num].is_none() {
+            let new_node = Box::new(LeafNode::new());
 
-                        // check if the file has enough data
-                        let file_pages = self.file_length as usize / PAGE_SIZE;
+            // TODO: should fetch data from file
 
-                        // info!(
-                        //     "trying to fetch page {}, file_pages = {}, divided = {}",
-                        //     page_num,
-                        //     file_pages,
-                        //     self.file_length as usize / PAGE_SIZE
-                        // );
-
-                        if page_num < file_pages {
-                            match self
-                                .file_descriptor
-                                .seek(std::io::SeekFrom::Start((page_num * PAGE_SIZE) as u64))
-                            {
-                                Ok(_) => {
-                                    // save buffer in pages
-
-                                    self.file_descriptor.read_exact(&mut allocated).unwrap();
-                                }
-                                Err(_) => return Err("Error trying to reach page from file"),
-                            }
-                        } else if page_num == file_pages {
-                            // check for partial page
-                            let partial_page_length =
-                                (self.file_length % PAGE_SIZE as u64) as usize;
-
-                            if partial_page_length > 0 {
-                                match self
-                                    .file_descriptor
-                                    .seek(std::io::SeekFrom::Start((page_num * PAGE_SIZE) as u64))
-                                {
-                                    Ok(_) => {
-                                        // save buffer in pages
-                                        self.file_descriptor
-                                            .read_exact(&mut allocated[0..partial_page_length])
-                                            .unwrap();
-                                    }
-                                    Err(_) => return Err("Error trying to reach page from file"),
-                                }
-                            }
-                        }
-
-                        self.pages[page_num] = Some(allocated);
-                        return Ok(self.pages[page_num].as_mut().unwrap().as_mut_ptr());
-                    }
-                }
-            }
-            None => Err("Error fetching page from pager"),
+            self.pages[page_num] = Some(new_node);
         }
+
+        match self.pages[page_num] {
+            Some(ref mut page) => {
+                return Ok(page);
+            }
+            None => {
+                return Err("Error fetching page");
+            }
+        };
+
+        // // check if we already loaded this page
+        // match self.pages[page_num] {
+        //     Some(page) => {
+        //         return Ok(page);
+        //     }
+        //     None => {
+        //         let allocated: Box<LeafNode> = Box::new(LeafNode::new());
+
+        //         // check if the file has enough data
+        //         // let file_pages = self.file_length as usize / PAGE_SIZE;
+
+        //         // info!(
+        //         //     "trying to fetch page {}, file_pages = {}, divided = {}",
+        //         //     page_num,
+        //         //     file_pages,
+        //         //     self.file_length as usize / PAGE_SIZE
+        //         // );
+
+        //         // if page_num < file_pages {
+        //         //     match self
+        //         //         .file_descriptor
+        //         //         .seek(std::io::SeekFrom::Start((page_num * PAGE_SIZE) as u64))
+        //         //     {
+        //         //         Ok(_) => {
+        //         //             // save buffer in pages
+
+        //         //             self.file_descriptor.read_exact(&mut allocated).unwrap();
+        //         //         }
+        //         //         Err(_) => return Err("Error trying to reach page from file"),
+        //         //     }
+        //         // }
+
+        //         return Ok(allocated);
+        //     }
+        // }
     }
 }
