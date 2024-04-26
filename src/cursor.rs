@@ -1,6 +1,5 @@
-use crate::db;
+use crate::{db, tree::LeafNode};
 use db::Table;
-use log::info;
 
 pub struct Cursor<'a> {
     pub table: &'a mut Table,
@@ -36,6 +35,15 @@ impl<'a> Cursor<'a> {
         };
     }
 
+    pub fn table_find(table: &mut Table, key: u32) -> Cursor {
+        let root_page_num = table.root_page_num;
+        let root_node = table.pager.get_page(root_page_num as usize).unwrap();
+
+        return LeafNode::node_find(table, root_page_num, key);
+
+        // TODO: implement searching an internal node
+    }
+
     pub fn advance_cursor(&mut self) {
         let page_num = self.page_num;
         self.cell_num = self.cell_num + 1;
@@ -50,28 +58,5 @@ impl<'a> Cursor<'a> {
         let page_num = cursor.page_num;
         let node = cursor.table.pager.get_page(page_num as usize).unwrap();
         return Ok(node.get_cell_value(cursor.cell_num));
-        // let row_num = cursor.row_num;
-        // let page_num: usize = (row_num / ROWS_PER_PAGE) as usize;
-        // // info!("total pages: {}", table.pages.len());
-
-        // if page_num > TABLE_MAX_PAGES as usize {
-        //     return Err("Trying to fetch from page out of bounds!");
-        // }
-
-        // let cur_page = cursor.table.pager.get_page(page_num);
-
-        // // info!("fetching from pages {}", page_num);
-
-        // match cur_page {
-        //     Ok(page) => unsafe {
-        //         // info!(
-        //         //     "Has page at address: {:?}. Adding {} rows",
-        //         //     page.as_ptr(),
-        //         //     row_num
-        //         // );
-        //         return Ok(page.add(ROW_SIZE * (row_num % ROWS_PER_PAGE) as usize));
-        //     },
-        //     Err(_) => return Err("Error fetching page from table"),
-        // }
     }
 }

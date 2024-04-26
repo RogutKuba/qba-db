@@ -4,8 +4,6 @@ use std::{
     path::Path,
 };
 
-use log::info;
-
 use crate::tree::LeafNode;
 
 pub const PAGE_SIZE: usize = 4096;
@@ -71,12 +69,12 @@ impl Pager {
             let mut raw_data = [0u8; PAGE_SIZE];
             let file_pages = self.file_length as usize / PAGE_SIZE;
 
-            info!(
-                "trying to fetch page {}, file_pages = {}, divided = {}",
-                page_num,
-                file_pages,
-                self.file_length as usize / PAGE_SIZE
-            );
+            // info!(
+            //     "trying to fetch page {}, file_pages = {}, divided = {}",
+            //     page_num,
+            //     file_pages,
+            //     self.file_length as usize / PAGE_SIZE
+            // );
 
             if page_num < file_pages {
                 match self
@@ -105,41 +103,5 @@ impl Pager {
                 return Err("Error fetching page");
             }
         };
-
-        // // check if we already loaded this page
-        // match self.pages[page_num] {
-        //     Some(page) => {
-        //         return Ok(page);
-        //     }
-        //     None => {
-        //         let allocated: Box<LeafNode> = Box::new(LeafNode::new());
-
-        //         // check if the file has enough data
-        //         // let file_pages = self.file_length as usize / PAGE_SIZE;
-
-        //         // info!(
-        //         //     "trying to fetch page {}, file_pages = {}, divided = {}",
-        //         //     page_num,
-        //         //     file_pages,
-        //         //     self.file_length as usize / PAGE_SIZE
-        //         // );
-
-        //         // if page_num < file_pages {
-        //         //     match self
-        //         //         .file_descriptor
-        //         //         .seek(std::io::SeekFrom::Start((page_num * PAGE_SIZE) as u64))
-        //         //     {
-        //         //         Ok(_) => {
-        //         //             // save buffer in pages
-
-        //         //             self.file_descriptor.read_exact(&mut allocated).unwrap();
-        //         //         }
-        //         //         Err(_) => return Err("Error trying to reach page from file"),
-        //         //     }
-        //         // }
-
-        //         return Ok(allocated);
-        //     }
-        // }
     }
 }

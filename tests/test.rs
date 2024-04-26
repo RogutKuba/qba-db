@@ -37,7 +37,7 @@ mod tests {
         init();
         let mut db = Db::new(String::from("test.db"));
 
-        for _ in 0..2 {
+        for _ in 0..35 {
             let insert_command = String::from("insert 1 test_user test_email");
             db.run_db_test(insert_command);
         }

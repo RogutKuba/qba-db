@@ -1,5 +1,4 @@
-use crate::tree::{LeafNode, LEAF_NODE_MAX_CELLS};
-// module imports
+use crate::tree::LeafNode;
 use crate::{cursor, pager};
 
 use cursor::Cursor;
@@ -8,7 +7,6 @@ use log::info;
 use std::io::{stdin, stdout, Write};
 use std::mem;
 use std::os::unix::fs::FileExt;
-use std::process::exit;
 
 use pager::Pager;
 use pager::PAGE_SIZE;
@@ -161,7 +159,6 @@ impl Db {
     }
 
     pub fn close_db(&mut self) -> Result<(), &str> {
-        info!("SHOULD WRITE DATA TO FILE");
         // write all bytes of pages into file;
         let mut cursor = Cursor::table_start(&mut self.table);
 
@@ -169,7 +166,7 @@ impl Db {
         let mut pages_written = 0;
 
         while end_of_table == false {
-            info!("trying to save node {}", pages_written);
+            info!("saving node to file");
             let node = cursor
                 .table
                 .pager
@@ -177,10 +174,8 @@ impl Db {
                 .unwrap();
 
             let mut page_to_write = [0u8; PAGE_SIZE];
-            info!("deserializing node to {:?}", page_to_write.as_ptr());
             LeafNode::deserialize_node(node, page_to_write.as_mut_ptr());
 
-            info!("saving node to file");
             match cursor
                 .table
                 .pager
@@ -196,55 +191,6 @@ impl Db {
             cursor.advance_cursor();
             end_of_table = cursor.end_of_table;
         }
-
-        // let mut pages_written = 0;
-        // let num_full_pages = (self.table.num_rows / ROWS_PER_PAGE) as usize;
-
-        // for i in 0..num_full_pages {
-        //     let page_opt = self.table.pager.pages.get(i).unwrap();
-
-        //     match page_opt {
-        //         Some(page) => {
-        //             // if pages are full write all to disk
-        //             match self
-        //                 .table
-        //                 .pager
-        //                 .file_descriptor
-        //                 .write_all_at(page, PAGE_SIZE as u64 * pages_written)
-        //             {
-        //                 Ok(_) => {
-        //                     pages_written = pages_written + 1;
-        //                 }
-        //                 Err(_) => return Err("Error saving db to file!"),
-        //             }
-        //         }
-        //         None => {}
-        //     }
-        // }
-
-        // // handle partial page at the end
-        // let remaining_rows = (self.table.num_rows % ROWS_PER_PAGE) as usize;
-
-        // if remaining_rows > 0 {
-        //     let page_opt = self.table.pager.pages.get(num_full_pages).unwrap();
-
-        //     match page_opt {
-        //         Some(page) => {
-        //             let bytes_to_write = remaining_rows * ROW_SIZE;
-
-        //             match self
-        //                 .table
-        //                 .pager
-        //                 .file_descriptor
-        //                 .write_all_at(&page[0..bytes_to_write], PAGE_SIZE as u64 * pages_written)
-        //             {
-        //                 Ok(_) => {}
-        //                 Err(_) => return Err("Error saving db to file!"),
-        //             }
-        //         }
-        //         None => {}
-        //     }
-        // }
 
         Ok(())
     }
@@ -304,7 +250,10 @@ fn prepare_statement(user_input: &String, statement: &mut Statement) -> Statemen
 fn execute_statement(statement: Statement, table: &mut Table) {
     match statement.statement_type {
         StatementType::Select => execute_select_statement(statement, table).unwrap(),
-        StatementType::Insert => execute_insert_statement(statement, table).unwrap(),
+        StatementType::Insert => match execute_insert_statement(statement, table) {
+            Ok(_) => {}
+            Err(e) => info!("Error inserting! {}", e),
+        },
     }
 }
 
@@ -335,22 +284,27 @@ fn execute_select_statement(_: Statement, table: &mut Table) -> Result<(), &'sta
 }
 
 fn execute_insert_statement(statement: Statement, table: &mut Table) -> Result<(), &'static str> {
-    // let num_rows = table.num_rows;
     let row = &statement.row_to_insert;
-    let mut cursor = Cursor::table_end(table);
+    let key_to_insert = row.id;
+
+    let mut cursor = Cursor::table_find(table, key_to_insert);
+
+    info!("Insert cursor is at cell_num: {}", cursor.cell_num);
+
+    let node = cursor
+        .table
+        .pager
+        .get_page(cursor.page_num as usize)
+        .unwrap();
+
+    if cursor.cell_num < node.num_cells {
+        let key_at_index = node.get_cell_key(cursor.cell_num);
+        if key_at_index == key_to_insert {
+            return Err("Duplicate key detected");
+        }
+    }
+
     LeafNode::insert(&mut cursor, row.id, row);
-
-    // // let row_slot = get_table_row(table, num_rows).unwrap();
-    // let row_slot = Cursor::get_cursor_value(&mut cursor).unwrap();
-    // table.num_rows = num_rows + 1;
-
-    // match serialize_row(&statement.row_to_insert, row_slot) {
-    //     Ok(()) => {}
-    //     Err(error) => {
-    //         table.num_rows = num_rows;
-    //         info!("Error inserting row! {}", error);
-    //     }
-    // }
 
     Ok(())
 }
@@ -398,17 +352,6 @@ unsafe fn unsafe_serialize_row(source: &Row, destination: *mut u8) -> Result<(),
         destination.offset(EMAIL_OFFSET as isize),
         email_bytes.len(),
     );
-
-    // info!();
-    // println!("[EMAIL]: now going to read what we just wrote!");
-    // let email_slice =
-    //     std::slice::from_raw_parts(destination.offset(EMAIL_OFFSET as isize), EMAIL_SIZE);
-    // println!(
-    //     "[EMAIL]: Reading bytes: from source {:?} with len {}. bytes are {:?}",
-    //     destination.offset(EMAIL_OFFSET as isize),
-    //     EMAIL_SIZE,
-    //     email_slice
-    // );
 
     Ok(())
 }
