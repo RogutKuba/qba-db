@@ -7,6 +7,7 @@ use log::info;
 
 use std::io::{stdin, stdout, Write};
 use std::mem;
+use std::os::unix::fs::FileExt;
 use std::process::exit;
 
 use pager::Pager;
@@ -159,9 +160,43 @@ impl Db {
         }
     }
 
-    pub fn close_db(&self) -> Result<(), &str> {
+    pub fn close_db(&mut self) -> Result<(), &str> {
         info!("SHOULD WRITE DATA TO FILE");
-        // write all bytes of pages into file
+        // write all bytes of pages into file;
+        let mut cursor = Cursor::table_start(&mut self.table);
+
+        let mut end_of_table = cursor.end_of_table;
+        let mut pages_written = 0;
+
+        while end_of_table == false {
+            info!("trying to save node {}", pages_written);
+            let node = cursor
+                .table
+                .pager
+                .get_page(cursor.page_num as usize)
+                .unwrap();
+
+            let mut page_to_write = [0u8; PAGE_SIZE];
+            info!("deserializing node to {:?}", page_to_write.as_ptr());
+            LeafNode::deserialize_node(node, page_to_write.as_mut_ptr());
+
+            info!("saving node to file");
+            match cursor
+                .table
+                .pager
+                .file_descriptor
+                .write_all_at(&page_to_write, PAGE_SIZE as u64 * pages_written)
+            {
+                Ok(_) => {
+                    pages_written = pages_written + 1;
+                }
+                Err(_) => return Err("Error saving db to file!"),
+            }
+
+            cursor.advance_cursor();
+            end_of_table = cursor.end_of_table;
+        }
+
         // let mut pages_written = 0;
         // let num_full_pages = (self.table.num_rows / ROWS_PER_PAGE) as usize;
 

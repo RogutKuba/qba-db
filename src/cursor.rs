@@ -1,7 +1,6 @@
-use crate::{db, pager};
-use db::{Table, ROWS_PER_PAGE, ROW_SIZE};
+use crate::db;
+use db::Table;
 use log::info;
-use pager::TABLE_MAX_PAGES;
 
 pub struct Cursor<'a> {
     pub table: &'a mut Table,

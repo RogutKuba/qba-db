@@ -67,9 +67,32 @@ impl Pager {
         }
 
         if self.pages[page_num].is_none() {
-            let new_node = Box::new(LeafNode::new());
+            let mut new_node = Box::new(LeafNode::new());
+            let mut raw_data = [0u8; PAGE_SIZE];
+            let file_pages = self.file_length as usize / PAGE_SIZE;
 
-            // TODO: should fetch data from file
+            info!(
+                "trying to fetch page {}, file_pages = {}, divided = {}",
+                page_num,
+                file_pages,
+                self.file_length as usize / PAGE_SIZE
+            );
+
+            if page_num < file_pages {
+                match self
+                    .file_descriptor
+                    .seek(std::io::SeekFrom::Start((page_num * PAGE_SIZE) as u64))
+                {
+                    Ok(_) => {
+                        // save buffer in pages
+
+                        self.file_descriptor.read_exact(&mut raw_data).unwrap();
+                    }
+                    Err(_) => return Err("Error trying to reach page from file"),
+                }
+            }
+
+            LeafNode::serialize_node(raw_data.as_mut_ptr(), &mut new_node);
 
             self.pages[page_num] = Some(new_node);
         }
