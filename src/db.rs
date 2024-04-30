@@ -1,4 +1,4 @@
-use crate::tree::LeafNode;
+use crate::leaf_node::LeafNode;
 use crate::{cursor, pager};
 
 use cursor::Cursor;
@@ -167,14 +167,14 @@ impl Db {
 
         while end_of_table == false {
             info!("saving node to file");
-            let node = cursor
+            let mut node = cursor
                 .table
                 .pager
                 .get_page(cursor.page_num as usize)
                 .unwrap();
 
             let mut page_to_write = [0u8; PAGE_SIZE];
-            LeafNode::deserialize_node(node, page_to_write.as_mut_ptr());
+            LeafNode::deserialize_node(&mut node, page_to_write.as_mut_ptr());
 
             match cursor
                 .table

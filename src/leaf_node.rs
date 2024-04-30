@@ -1,9 +1,10 @@
 use crate::{
     cursor::Cursor,
     db::{self, serialize_row, Row, Table},
+    internal_node::InternalNode,
     pager::PAGE_SIZE,
 };
-use std::{mem, process::exit, ptr};
+use std::{mem, ptr};
 
 use db::ROW_SIZE;
 use log::info;
@@ -41,6 +42,12 @@ const LEAF_NODE_VALUE_OFFSET: usize = LEAF_NODE_KEY_OFFSET + LEAF_NODE_KEY_SIZE;
 const LEAF_NODE_CELL_SIZE: usize = LEAF_NODE_KEY_SIZE + LEAF_NODE_VALUE_SIZE;
 const LEAF_NODE_SPACE_FOR_CELLS: usize = PAGE_SIZE - LEAF_NODE_HEADER_SIZE;
 pub const LEAF_NODE_MAX_CELLS: usize = LEAF_NODE_SPACE_FOR_CELLS / LEAF_NODE_CELL_SIZE;
+
+/**
+ * For splitting
+ */
+const LEAF_NODE_RIGHT_SPLIT_COUNT: usize = (LEAF_NODE_MAX_CELLS + 1) / 2;
+const LEAF_NODE_LEFT_SPLIT_COUNT: usize = (LEAF_NODE_MAX_CELLS + 1) - LEAF_NODE_RIGHT_SPLIT_COUNT;
 
 #[derive(Clone)]
 pub struct LeafNode {
@@ -202,14 +209,16 @@ impl LeafNode {
     }
 
     pub fn insert(cursor: &mut Cursor, key: u32, row: &Row) {
-        let page_num = cursor.page_num;
-        let node = cursor.table.pager.get_page(page_num as usize).unwrap();
-        let num_cells = node.num_cells;
+        let requires_split = LeafNode::requires_split_and_insert(cursor);
 
-        if num_cells as usize >= LEAF_NODE_MAX_CELLS {
+        if requires_split {
             info!("LEAF HAS HIT MAX LIMIT OF CELLS");
-            exit(1);
+            return LeafNode::split_and_insert(cursor, key, row);
         }
+
+        let page_num = cursor.page_num as usize;
+        let node = cursor.table.pager.get_page(page_num).unwrap();
+        let num_cells = node.num_cells;
 
         if cursor.cell_num < num_cells {
             // make room for new cell
@@ -238,6 +247,79 @@ impl LeafNode {
         match serialize_row(row, node.get_cell_value(cursor.cell_num)) {
             Ok(_) => {}
             Err(e) => info!("Could not insert row! {}", e),
+        }
+    }
+
+    fn requires_split_and_insert(cursor: &mut Cursor) -> bool {
+        let page_num = cursor.page_num as usize;
+        let node = cursor.table.pager.get_page(page_num).unwrap();
+        let num_cells = node.num_cells;
+
+        return num_cells as usize >= LEAF_NODE_MAX_CELLS;
+    }
+
+    fn split_and_insert(cursor: &mut Cursor, key: u32, row: &Row) {
+        let pager = &mut cursor.table.pager;
+
+        // Get old_node page first and store necessary info, if required
+        let old_page_index = cursor.page_num as usize;
+        let new_page_num = pager.get_unused_page_num() as usize;
+
+        info!(
+            "old_page_num {} unused_page_num {}",
+            old_page_index, new_page_num
+        );
+
+        let (mut old_node, mut new_node) =
+            pager.get_two_pages(old_page_index, new_page_num).unwrap();
+        // Continue with your logic, possibly involving old_node and new_node
+
+        // start from right side of leaf node and move cells over to new node
+        for i in (0..=LEAF_NODE_MAX_CELLS).rev() {
+            //
+            let destination_node = {
+                if i >= LEAF_NODE_LEFT_SPLIT_COUNT {
+                    &mut new_node
+                } else {
+                    &mut old_node
+                }
+            };
+
+            let index_within_node = i % LEAF_NODE_LEFT_SPLIT_COUNT;
+            let destination = destination_node.get_cell(index_within_node as u32);
+
+            if i == cursor.cell_num as usize {
+                // save key
+                unsafe {
+                    ptr::copy_nonoverlapping(
+                        &key as *const _ as *const u8,
+                        destination.add(LEAF_NODE_KEY_OFFSET),
+                        LEAF_NODE_KEY_SIZE,
+                    );
+                }
+                serialize_row(row, destination).unwrap();
+            } else {
+                let cell_to_move = {
+                    if i > cursor.cell_num as usize {
+                        old_node.get_cell(i as u32 - 1)
+                    } else {
+                        old_node.get_cell(i as u32)
+                    }
+                };
+
+                unsafe {
+                    ptr::copy_nonoverlapping(cell_to_move, destination, LEAF_NODE_CELL_SIZE);
+                }
+            }
+
+            old_node.num_cells = LEAF_NODE_LEFT_SPLIT_COUNT as u32;
+            new_node.num_cells = LEAF_NODE_RIGHT_SPLIT_COUNT as u32;
+
+            if old_node.is_root {
+                return InternalNode::create_new_root(cursor.table, new_page_num as u32);
+            } else {
+                info!("Need to implement setting parent after leafnode split");
+            }
         }
     }
 }

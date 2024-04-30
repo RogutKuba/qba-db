@@ -4,9 +4,11 @@ use std::{
     path::Path,
 };
 
-use crate::tree::LeafNode;
+use log::info;
 
-pub const PAGE_SIZE: usize = 4096;
+use crate::leaf_node::LeafNode;
+
+pub const PAGE_SIZE: usize = 150;
 pub const TABLE_MAX_PAGES: usize = 100;
 
 pub struct Pager {
@@ -59,22 +61,68 @@ impl Pager {
         }
     }
 
-    pub fn get_page<'a>(&'a mut self, page_num: usize) -> Result<&'a mut LeafNode, &'a str> {
+    pub fn get_page(&mut self, page_num: usize) -> Result<&mut LeafNode, &str> {
         if page_num > TABLE_MAX_PAGES {
             return Err("Hit page limit for table");
         }
 
+        self.check_page(page_num).unwrap();
+
+        match &mut self.pages[page_num] {
+            Some(page) => {
+                return Ok(page);
+            }
+            None => {
+                return Err("Error fetching page");
+            }
+        };
+    }
+
+    pub fn get_two_pages(
+        &mut self,
+        first_page_num: usize,
+        second_page_num: usize,
+    ) -> Result<(&mut LeafNode, &mut LeafNode), &str> {
+        if first_page_num > TABLE_MAX_PAGES || second_page_num > TABLE_MAX_PAGES {
+            return Err("Hit page limit for table");
+        }
+
+        self.check_page(first_page_num).unwrap();
+        self.check_page(second_page_num).unwrap();
+
+        let (lower, higher) = {
+            if first_page_num < second_page_num {
+                (first_page_num, second_page_num)
+            } else {
+                (second_page_num, first_page_num)
+            }
+        };
+
+        let (a, b) = self.pages.split_at_mut(higher);
+
+        // Get mutable references to the page contents, handling cases where they might be None
+        let lower_page_ref = match a[lower].as_mut() {
+            Some(page) => page,
+            None => return Err("Requested page does not exist"),
+        };
+        let higher_page_ref = match b[0].as_mut() {
+            Some(page) => page,
+            None => return Err("Requested page does not exist"),
+        };
+
+        if first_page_num == lower {
+            Ok((lower_page_ref, higher_page_ref))
+        } else {
+            Ok((higher_page_ref, lower_page_ref))
+        }
+    }
+
+    fn check_page(&mut self, page_num: usize) -> Result<(), &str> {
         if self.pages[page_num].is_none() {
+            info!("adding new page at index {}", page_num);
             let mut new_node = Box::new(LeafNode::new());
             let mut raw_data = [0u8; PAGE_SIZE];
             let file_pages = self.file_length as usize / PAGE_SIZE;
-
-            // info!(
-            //     "trying to fetch page {}, file_pages = {}, divided = {}",
-            //     page_num,
-            //     file_pages,
-            //     self.file_length as usize / PAGE_SIZE
-            // );
 
             if page_num < file_pages {
                 match self
@@ -93,15 +141,13 @@ impl Pager {
             LeafNode::serialize_node(raw_data.as_mut_ptr(), &mut new_node);
 
             self.pages[page_num] = Some(new_node);
+            self.num_pages = self.num_pages + 1;
         }
 
-        match self.pages[page_num] {
-            Some(ref mut page) => {
-                return Ok(page);
-            }
-            None => {
-                return Err("Error fetching page");
-            }
-        };
+        Ok(())
+    }
+
+    pub fn get_unused_page_num(&self) -> u32 {
+        return self.num_pages;
     }
 }

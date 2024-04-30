@@ -1,4 +1,4 @@
-use crate::{db, tree::LeafNode};
+use crate::{db, leaf_node::LeafNode};
 use db::Table;
 
 pub struct Cursor<'a> {
@@ -37,7 +37,7 @@ impl<'a> Cursor<'a> {
 
     pub fn table_find(table: &mut Table, key: u32) -> Cursor {
         let root_page_num = table.root_page_num;
-        let root_node = table.pager.get_page(root_page_num as usize).unwrap();
+        // let root_node = table.pager.get_page(root_page_num as usize).unwrap();
 
         return LeafNode::node_find(table, root_page_num, key);
 
