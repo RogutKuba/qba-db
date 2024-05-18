@@ -17,13 +17,13 @@ use log::info;
 /*
 * Common Node Header Layout
 */
-const NODE_TYPE_SIZE: usize = mem::size_of::<u8>();
-const NODE_TYPE_OFFSET: usize = 0;
-const IS_ROOT_SIZE: usize = mem::size_of::<u8>();
-const IS_ROOT_OFFSET: usize = NODE_TYPE_SIZE;
-const PARENT_POINTER_SIZE: usize = mem::size_of::<u32>();
-const PARENT_POINTER_OFFSET: usize = IS_ROOT_OFFSET + IS_ROOT_SIZE;
-const COMMON_NODE_HEADER_SIZE: usize = NODE_TYPE_SIZE + IS_ROOT_SIZE + PARENT_POINTER_SIZE;
+pub const NODE_TYPE_SIZE: usize = mem::size_of::<u8>();
+pub const NODE_TYPE_OFFSET: usize = 0;
+pub const IS_ROOT_SIZE: usize = mem::size_of::<u8>();
+pub const IS_ROOT_OFFSET: usize = NODE_TYPE_SIZE;
+pub const PARENT_POINTER_SIZE: usize = mem::size_of::<u32>();
+pub const PARENT_POINTER_OFFSET: usize = IS_ROOT_OFFSET + IS_ROOT_SIZE;
+pub const COMMON_NODE_HEADER_SIZE: usize = NODE_TYPE_SIZE + IS_ROOT_SIZE + PARENT_POINTER_SIZE;
 
 /**
  * Lead Node Header Layout
@@ -136,6 +136,16 @@ impl LeafNode {
 
     pub fn serialize_node(source: *mut u8, dest: &mut LeafNode) {
         unsafe {
+            let node_type_slice = std::slice::from_raw_parts(
+                source.offset(NODE_TYPE_OFFSET as isize),
+                NODE_TYPE_SIZE,
+            );
+            match node_type_slice.get(0) {
+                Some(&0) => panic!("Tried to deserialize internal node into leaf node!"),
+                Some(&1) => {}
+                _ => panic!("Invalid boolean value"),
+            };
+
             // deserialize is_root
             let is_root_slice =
                 std::slice::from_raw_parts(source.offset(IS_ROOT_OFFSET as isize), IS_ROOT_SIZE);
@@ -174,7 +184,7 @@ impl LeafNode {
     }
 
     pub fn node_find(table: &mut Table, page_num: u32, key: u32) -> Cursor {
-        let node = table.pager.get_page(page_num as usize).unwrap();
+        let node = table.pager.get_page_leaf(page_num as usize).unwrap();
         let num_cells = node.num_cells;
         let cell_num: u32 = {
             let mut min_index = 0;
@@ -217,7 +227,7 @@ impl LeafNode {
         }
 
         let page_num = cursor.page_num as usize;
-        let node = cursor.table.pager.get_page(page_num).unwrap();
+        let node = cursor.table.pager.get_page_leaf(page_num).unwrap();
         let num_cells = node.num_cells;
 
         if cursor.cell_num < num_cells {
@@ -252,7 +262,7 @@ impl LeafNode {
 
     fn requires_split_and_insert(cursor: &mut Cursor) -> bool {
         let page_num = cursor.page_num as usize;
-        let node = cursor.table.pager.get_page(page_num).unwrap();
+        let node = cursor.table.pager.get_page_leaf(page_num).unwrap();
         let num_cells = node.num_cells;
 
         return num_cells as usize >= LEAF_NODE_MAX_CELLS;
@@ -270,8 +280,12 @@ impl LeafNode {
             old_page_index, new_page_num
         );
 
-        let (mut old_node, mut new_node) =
-            pager.get_two_pages(old_page_index, new_page_num).unwrap();
+        // ensure both pages exist
+        pager.ensure_page_leaf(old_page_index).unwrap();
+        pager.ensure_page_leaf(new_page_num).unwrap();
+        let (mut old_node, mut new_node) = pager
+            .get_two_pages_leaf(old_page_index, new_page_num)
+            .unwrap();
         // Continue with your logic, possibly involving old_node and new_node
 
         // start from right side of leaf node and move cells over to new node
@@ -311,15 +325,29 @@ impl LeafNode {
                     ptr::copy_nonoverlapping(cell_to_move, destination, LEAF_NODE_CELL_SIZE);
                 }
             }
+        }
 
-            old_node.num_cells = LEAF_NODE_LEFT_SPLIT_COUNT as u32;
-            new_node.num_cells = LEAF_NODE_RIGHT_SPLIT_COUNT as u32;
+        old_node.num_cells = LEAF_NODE_LEFT_SPLIT_COUNT as u32;
+        new_node.num_cells = LEAF_NODE_RIGHT_SPLIT_COUNT as u32;
 
-            if old_node.is_root {
-                return InternalNode::create_new_root(cursor.table, new_page_num as u32);
-            } else {
-                info!("Need to implement setting parent after leafnode split");
-            }
+        if old_node.is_root {
+            return InternalNode::create_new_root_from_leaf(cursor.table, new_page_num as u32);
+        } else {
+            info!("Need to implement setting parent after leafnode split");
+        }
+    }
+
+    pub fn get_max_key(&mut self) -> u32 {
+        self.get_cell_key(self.num_cells - 1)
+    }
+
+    pub fn print_node(&mut self) {
+        let num_cells = self.num_cells;
+        info!("- leaf (num_cells: {})", num_cells);
+
+        for i in 0..num_cells {
+            let cell_key = self.get_cell_key(i);
+            info!("- {}", cell_key);
         }
     }
 }

@@ -14,6 +14,7 @@ use pager::PAGE_SIZE;
 enum StatementType {
     Select,
     Insert,
+    PrintTree,
 }
 
 struct Statement {
@@ -166,11 +167,11 @@ impl Db {
         let mut pages_written = 0;
 
         while end_of_table == false {
-            info!("saving node to file");
+            info!("saving node at page_num: {} to file", cursor.page_num);
             let mut node = cursor
                 .table
                 .pager
-                .get_page(cursor.page_num as usize)
+                .get_page_leaf(cursor.page_num as usize)
                 .unwrap();
 
             let mut page_to_write = [0u8; PAGE_SIZE];
@@ -242,6 +243,9 @@ fn prepare_statement(user_input: &String, statement: &mut Statement) -> Statemen
         statement.row_to_insert.email = row_args[3].to_string();
 
         return StatementPrepareResponse::Success;
+    } else if user_input.as_str() == "print_tree" {
+        statement.statement_type = StatementType::PrintTree;
+        return StatementPrepareResponse::Success;
     } else {
         return StatementPrepareResponse::UnrecognizedCommand;
     }
@@ -254,7 +258,17 @@ fn execute_statement(statement: Statement, table: &mut Table) {
             Ok(_) => {}
             Err(e) => info!("Error inserting! {}", e),
         },
+        StatementType::PrintTree => execute_print_tree_statement(statement, table).unwrap(),
     }
+}
+
+fn execute_print_tree_statement(_: Statement, table: &mut Table) -> Result<(), &'static str> {
+    info!("Print tree:");
+
+    let root_page_num = table.root_page_num as usize;
+    table.pager.print_b_tree(root_page_num, 0);
+
+    Ok(())
 }
 
 fn execute_select_statement(_: Statement, table: &mut Table) -> Result<(), &'static str> {
@@ -294,7 +308,7 @@ fn execute_insert_statement(statement: Statement, table: &mut Table) -> Result<(
     let node = cursor
         .table
         .pager
-        .get_page(cursor.page_num as usize)
+        .get_page_leaf(cursor.page_num as usize)
         .unwrap();
 
     if cursor.cell_num < node.num_cells {
