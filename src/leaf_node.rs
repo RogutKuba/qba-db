@@ -30,7 +30,10 @@ pub const COMMON_NODE_HEADER_SIZE: usize = NODE_TYPE_SIZE + IS_ROOT_SIZE + PAREN
  */
 const LEAF_NODE_NUM_CELLS_SIZE: usize = mem::size_of::<u32>();
 const LEAF_NODE_NUM_CELLS_OFFSET: usize = COMMON_NODE_HEADER_SIZE;
-const LEAF_NODE_HEADER_SIZE: usize = COMMON_NODE_HEADER_SIZE + LEAF_NODE_NUM_CELLS_SIZE;
+const LEAF_NODE_NEXT_LEAF_SIZE: usize = mem::size_of::<u32>();
+const LEAF_NODE_NEXT_LEAF_OFFSET: usize = LEAF_NODE_NUM_CELLS_OFFSET + LEAF_NODE_NUM_CELLS_SIZE;
+const LEAF_NODE_HEADER_SIZE: usize =
+    COMMON_NODE_HEADER_SIZE + LEAF_NODE_NUM_CELLS_SIZE + LEAF_NODE_NEXT_LEAF_SIZE;
 
 /**
  * Leaf Node Body Layout
@@ -55,6 +58,7 @@ pub struct LeafNode {
     pub parent_ptr: u32,
     // leaf_format
     pub num_cells: u32,
+    pub next_leaf: u32,
     pub cells: [u8; LEAF_NODE_SPACE_FOR_CELLS],
 }
 
@@ -63,6 +67,7 @@ impl LeafNode {
         return LeafNode {
             is_root: false,
             parent_ptr: 0,
+            next_leaf: 0,
             num_cells: 0,
             cells: [0; LEAF_NODE_SPACE_FOR_CELLS],
         };
@@ -124,6 +129,12 @@ impl LeafNode {
                 LEAF_NODE_NUM_CELLS_SIZE,
             );
 
+            ptr::copy_nonoverlapping(
+                &node.next_leaf as *const _ as *const u8,
+                destination.offset(LEAF_NODE_NEXT_LEAF_OFFSET as isize) as *mut u8,
+                LEAF_NODE_NEXT_LEAF_SIZE,
+            );
+
             // pub cells: Vec<u8>,
             // info!("writing cells");
             ptr::copy_nonoverlapping(
@@ -169,6 +180,13 @@ impl LeafNode {
             );
             let num_cells = u32::from_ne_bytes(num_cells_slice.try_into().unwrap());
 
+            // pub next_leaf: u32
+            let next_leaf_slice = std::slice::from_raw_parts(
+                source.offset(LEAF_NODE_NEXT_LEAF_OFFSET as isize),
+                LEAF_NODE_NEXT_LEAF_SIZE,
+            );
+            let next_leaf = u32::from_ne_bytes(next_leaf_slice.try_into().unwrap());
+
             // pub cells: Vec<u8>,
             let cells_slice = std::slice::from_raw_parts(
                 source.offset(LEAF_NODE_HEADER_SIZE as isize),
@@ -179,6 +197,7 @@ impl LeafNode {
             dest.is_root = is_root;
             dest.parent_ptr = parent_ptr;
             dest.num_cells = num_cells;
+            dest.next_leaf = next_leaf;
             dest.cells = cells;
         }
     }
@@ -222,7 +241,6 @@ impl LeafNode {
         let requires_split = LeafNode::requires_split_and_insert(cursor);
 
         if requires_split {
-            info!("LEAF HAS HIT MAX LIMIT OF CELLS");
             return LeafNode::split_and_insert(cursor, key, row);
         }
 
@@ -272,21 +290,20 @@ impl LeafNode {
         let pager = &mut cursor.table.pager;
 
         // Get old_node page first and store necessary info, if required
-        let old_page_index = cursor.page_num as usize;
+        let old_page_num = cursor.page_num as usize;
         let new_page_num = pager.get_unused_page_num() as usize;
 
-        info!(
-            "old_page_num {} unused_page_num {}",
-            old_page_index, new_page_num
-        );
-
         // ensure both pages exist
-        pager.ensure_page_leaf(old_page_index).unwrap();
+        pager.ensure_page_leaf(old_page_num).unwrap();
         pager.ensure_page_leaf(new_page_num).unwrap();
+
+        if old_page_num >= new_page_num {
+            panic!("old page num is greater than new page num!");
+        }
+
         let (mut old_node, mut new_node) = pager
-            .get_two_pages_leaf(old_page_index, new_page_num)
+            .get_two_pages_leaf(old_page_num, new_page_num)
             .unwrap();
-        // Continue with your logic, possibly involving old_node and new_node
 
         // start from right side of leaf node and move cells over to new node
         for i in (0..=LEAF_NODE_MAX_CELLS).rev() {
@@ -303,15 +320,15 @@ impl LeafNode {
             let destination = destination_node.get_cell(index_within_node as u32);
 
             if i == cursor.cell_num as usize {
-                // save key
+                // save to cell
                 unsafe {
                     ptr::copy_nonoverlapping(
                         &key as *const _ as *const u8,
                         destination.add(LEAF_NODE_KEY_OFFSET),
                         LEAF_NODE_KEY_SIZE,
                     );
+                    serialize_row(row, destination.add(LEAF_NODE_VALUE_OFFSET)).unwrap();
                 }
-                serialize_row(row, destination).unwrap();
             } else {
                 let cell_to_move = {
                     if i > cursor.cell_num as usize {
@@ -330,9 +347,13 @@ impl LeafNode {
         old_node.num_cells = LEAF_NODE_LEFT_SPLIT_COUNT as u32;
         new_node.num_cells = LEAF_NODE_RIGHT_SPLIT_COUNT as u32;
 
+        new_node.next_leaf = old_node.next_leaf;
+        old_node.next_leaf = new_page_num as u32;
+
         if old_node.is_root {
             return InternalNode::create_new_root_from_leaf(cursor.table, new_page_num as u32);
         } else {
+            // TODO:
             info!("Need to implement setting parent after leafnode split");
         }
     }

@@ -129,7 +129,7 @@ impl Pager {
                 return Err("Trying to check leaf node at page num where internal node exists");
             }
 
-            info!("adding new page for leafnode at index {}", page_num);
+            // info!("adding new page for leafnode at index {}", page_num);
             let mut new_node = Box::new(LeafNode::new());
             let file_pages = self.file_length as usize / PAGE_SIZE;
 
@@ -219,7 +219,7 @@ impl Pager {
         let mut res = String::from("");
 
         for _ in 0..level {
-            res = res + "   ";
+            res = res + "\t";
         }
 
         res
@@ -232,14 +232,30 @@ impl Pager {
 
                 let num_cells = node.num_cells;
                 info!(
-                    "{}- leaf (num_cells: {})",
+                    "{}- leaf @page_num={} (num_cells: {})",
                     Self::indent(indent_level),
+                    page_num,
                     num_cells
                 );
 
                 for i in 0..num_cells {
                     let cell_key = node.get_cell_key(i);
                     info!("{}- {}", Self::indent(indent_level), cell_key);
+
+                    // let cell_value = node.get_cell_value(i);
+                    // let mut row_data = Row {
+                    //     id: 123,
+                    //     email: String::from("123"),
+                    //     username: String::from("!@3"),
+                    // };
+                    // deserialize_row(cell_value, &mut row_data).unwrap();
+                    // info!(
+                    //     "{}- id  {}, username: {}, email: {}",
+                    //     Self::indent(indent_level),
+                    //     row_data.id,
+                    //     row_data.username,
+                    //     row_data.email
+                    // );
                 }
             }
             NodeType::Internal => {
@@ -247,19 +263,24 @@ impl Pager {
 
                 let num_keys = node.num_keys;
                 info!(
-                    "{}- internal (num_childs: {})",
+                    "{}- internal @page_num={} (num_childs: {})",
                     Self::indent(indent_level),
+                    page_num,
                     num_keys
                 );
 
-                let mut child_nums: Vec<u32> = vec![];
+                let mut child_nums: Vec<(u32, u32)> = vec![];
                 for i in 0..num_keys {
-                    let child_num = node.get_child(i);
-                    child_nums.push(child_num);
+                    // let child_num = node.get_child(i);
+                    // let key = node.cells[i as usize].0;
+                    child_nums.push(node.cells[i as usize]);
                 }
-                child_nums.push(node.right_child);
+                child_nums.push((0, node.right_child));
 
-                for num in child_nums {
+                for child in child_nums {
+                    let key = child.0;
+                    let num = child.1;
+                    info!("For key < {}", key);
                     self.print_b_tree(num as usize, indent_level + 1);
                 }
             }

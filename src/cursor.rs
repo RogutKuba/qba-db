@@ -10,19 +10,11 @@ pub struct Cursor<'a> {
 
 impl<'a> Cursor<'a> {
     pub fn table_start(table: &mut Table) -> Cursor {
-        let root_page_num = table.root_page_num;
+        let cursor = Self::table_find(table, 0);
+        let root_page_num = cursor.page_num;
 
-        let num_cells = {
-            match table.pager.get_page_node_type(root_page_num as usize) {
-                NodeType::Internal => {
-                    1 // internal node should never be end of table
-                }
-                NodeType::Leaf => {
-                    let root_node = table.pager.get_page_leaf(root_page_num as usize).unwrap();
-                    root_node.num_cells
-                }
-            }
-        };
+        let leaf_node = table.pager.get_page_leaf(root_page_num as usize).unwrap();
+        let num_cells = leaf_node.num_cells;
 
         return Cursor {
             table,
@@ -64,7 +56,15 @@ impl<'a> Cursor<'a> {
 
         let node = self.table.pager.get_page_leaf(page_num as usize).unwrap();
         if self.cell_num >= node.num_cells {
-            self.end_of_table = true;
+            // advance to next leaf node
+            let next_page_num = node.next_leaf;
+
+            if next_page_num == 0 {
+                self.end_of_table = true;
+            } else {
+                self.page_num = next_page_num;
+                self.cell_num = 0;
+            }
         }
     }
 

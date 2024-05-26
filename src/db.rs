@@ -51,9 +51,9 @@ impl Table {
 }
 
 pub struct Row {
-    id: u32,
-    username: String,
-    email: String,
+    pub id: u32,
+    pub username: String,
+    pub email: String,
 }
 
 pub struct Db {
@@ -303,7 +303,7 @@ fn execute_insert_statement(statement: Statement, table: &mut Table) -> Result<(
 
     let mut cursor = Cursor::table_find(table, key_to_insert);
 
-    info!("Insert cursor is at cell_num: {}", cursor.cell_num);
+    // info!("Insert cursor is at cell_num: {}", cursor.cell_num);
 
     let node = cursor
         .table

@@ -49,7 +49,7 @@ impl InternalNode {
             parent_ptr: 0,
             num_keys: 0,
             right_child: 0,
-            cells: [(0, 0); INTERNAL_NODE_MAX_CELLS],
+            cells: [(0, 0); INTERNAL_NODE_MAX_CELLS], // stored as (key, page_num)
         };
     }
 
@@ -59,9 +59,11 @@ impl InternalNode {
          * nowe we need to move the data from the old "left" node into a new page
          * and change the root back into a regular root node
          */
-        info!("Creating internal root node");
-
         let left_child_page_num = table.pager.get_unused_page_num();
+        // info!(
+        //     "Creating node through create internal root node method at {}",
+        //     left_child_page_num
+        // );
         let old_root_node = table
             .pager
             .get_page_leaf(table.root_page_num as usize)
@@ -99,7 +101,6 @@ impl InternalNode {
         if child_num > num_keys {
             panic!("Trying to access child outside of internal node bounds! child_num: {} > num_keys: {}", child_num, num_keys);
         } else if child_num == num_keys {
-            //
             return self.right_child;
         }
 
@@ -121,18 +122,24 @@ impl InternalNode {
             if key_to_right >= key {
                 max_index = index;
             } else {
-                min_index = index;
+                min_index = index + 1;
             }
         }
 
-        let child_page_num = node.cells[min_index as usize].1;
-        // let child = table.pager.get_page_leaf(child_page_num);
+        // // print out pairs of cells
+        // for i in 0..node.num_keys {
+        //     let tuple = node.cells[i as usize];
+        // }
+
+        let child_page_num = node.get_child(min_index);
 
         match table.pager.get_page_node_type(child_page_num as usize) {
             NodeType::Internal => {
+                info!("Next node is internal");
                 return InternalNode::node_find(table, child_page_num, key);
             }
             NodeType::Leaf => {
+                info!("Next node is leaf");
                 return LeafNode::node_find(table, child_page_num, key);
             }
         }
