@@ -129,7 +129,7 @@ impl Pager {
                 return Err("Trying to check leaf node at page num where internal node exists");
             }
 
-            // info!("adding new page for leafnode at index {}", page_num);
+            info!("adding new page for leafnode at index {}", page_num);
             let mut new_node = Box::new(LeafNode::new());
             let file_pages = self.file_length as usize / PAGE_SIZE;
 
@@ -162,6 +162,10 @@ impl Pager {
         first_page_num: usize,
         second_page_num: usize,
     ) -> Result<(&mut LeafNode, &mut LeafNode), &str> {
+        if first_page_num == second_page_num {
+            return Err("Tried to access same page num twice!");
+        }
+
         if first_page_num > TABLE_MAX_PAGES || second_page_num > TABLE_MAX_PAGES {
             return Err("Hit page limit for table");
         }
@@ -193,6 +197,207 @@ impl Pager {
             Ok((lower_page_ref, higher_page_ref))
         } else {
             Ok((higher_page_ref, lower_page_ref))
+        }
+    }
+
+    pub fn get_internal_and_leaf(
+        &mut self,
+        internal_page_num: usize,
+        leaf_page_num: usize,
+    ) -> Result<(&mut InternalNode, &mut LeafNode), &str> {
+        if internal_page_num == leaf_page_num {
+            return Err("Tried to access same page num twice!");
+        }
+
+        if internal_page_num > TABLE_MAX_PAGES || leaf_page_num > TABLE_MAX_PAGES {
+            return Err("Hit page limit for table");
+        }
+
+        let (lower, higher) = {
+            if internal_page_num < leaf_page_num {
+                (internal_page_num, leaf_page_num)
+            } else {
+                (leaf_page_num, internal_page_num)
+            }
+        };
+
+        let (a, b) = self.pages.split_at_mut(higher);
+
+        // Get mutable references to the page contents, handling cases where they might be None
+        let lower_page_ref = match a[lower].0.as_mut() {
+            Some(page) => page,
+            None => return Err("Requested page does not exist"),
+        };
+        let higher_page_ref = match b[0].1.as_mut() {
+            Some(page) => page,
+            None => return Err("Requested page does not exist"),
+        };
+
+        Ok((lower_page_ref, higher_page_ref))
+    }
+
+    /**
+     * RETURNS NODES FOR internal_node_insert
+     * (parent, child, right_node of parent)
+     */
+    pub fn get_nodes_for_internal_node_insert(
+        &mut self,
+        parent_page_num: usize,
+        child_page_num: usize,
+    ) -> Result<(&mut InternalNode, &mut LeafNode, &mut Box<LeafNode>), &str> {
+        if parent_page_num > TABLE_MAX_PAGES || child_page_num > TABLE_MAX_PAGES {
+            return Err("Hit page limit for table");
+        }
+
+        let tmp_parent = self.get_page_internal(parent_page_num).unwrap();
+        let right_child_page_num = tmp_parent.right_child as usize;
+        let does_need_right_child = right_child_page_num != 0;
+
+        info!(
+            "parent: {}, child: {}, right: {}",
+            parent_page_num, child_page_num, right_child_page_num
+        );
+
+        // now perform two split_at_muts to get all nodes
+        if does_need_right_child {
+            // ensure leaf nodes exist
+            self.ensure_page_leaf(child_page_num).unwrap();
+            self.ensure_page_leaf(right_child_page_num).unwrap();
+
+            let (lower_idx, middle_idx, upper_idx) = if parent_page_num < child_page_num {
+                if child_page_num < right_child_page_num {
+                    (parent_page_num, child_page_num, right_child_page_num)
+                } else if parent_page_num < right_child_page_num {
+                    (parent_page_num, right_child_page_num, child_page_num)
+                } else {
+                    (right_child_page_num, parent_page_num, child_page_num)
+                }
+            } else {
+                if parent_page_num < right_child_page_num {
+                    (child_page_num, parent_page_num, right_child_page_num)
+                } else if child_page_num < right_child_page_num {
+                    (child_page_num, right_child_page_num, parent_page_num)
+                } else {
+                    (right_child_page_num, child_page_num, parent_page_num)
+                }
+            };
+
+            // always 0
+            let relative_middle_idx = 0;
+            let relative_upper_idx = 0;
+
+            let (lower, middle, upper) = {
+                let (first, rest) = self.pages.split_at_mut(middle_idx);
+
+                let (second, third) = rest.split_at_mut(upper_idx - middle_idx);
+
+                (first, second, third)
+            };
+
+            // TODO: refactor below
+            // parent node first
+            if lower_idx == parent_page_num {
+                let parent_node_ref = match lower[lower_idx].0.as_mut() {
+                    Some(page) => page,
+                    None => return Err("Requested page does not exist for parent 1"),
+                };
+
+                // if statement for child and right child is other
+                if middle_idx == child_page_num {
+                    let child_node_ref = match middle[relative_middle_idx].1.as_mut() {
+                        Some(page) => page,
+                        None => return Err("Requested page does not exist for mid 2"),
+                    };
+
+                    let right_node_ref = match upper[relative_upper_idx].1.as_mut() {
+                        Some(page) => page,
+                        None => return Err("Requested page does not exist for mid 3"),
+                    };
+
+                    return Ok((parent_node_ref, child_node_ref, right_node_ref));
+                } else {
+                    // upper == child
+                    let child_node_ref = match upper[relative_upper_idx].1.as_mut() {
+                        Some(page) => page,
+                        None => return Err("Requested page does not exist for mid 4"),
+                    };
+
+                    let right_node_ref = match middle[relative_middle_idx].1.as_mut() {
+                        Some(page) => page,
+                        None => return Err("Requested page does not exist for mid 5"),
+                    };
+
+                    return Ok((parent_node_ref, child_node_ref, right_node_ref));
+                }
+            } else if middle_idx == parent_page_num {
+                let parent_node_ref = match middle[relative_middle_idx].0.as_mut() {
+                    Some(page) => page,
+                    None => return Err("Requested page does not exist for parent 6"),
+                };
+
+                // if statement for child and right child is other
+                if lower_idx == child_page_num {
+                    let child_node_ref = match lower[lower_idx].1.as_mut() {
+                        Some(page) => page,
+                        None => return Err("Requested page does not exist for mid 7"),
+                    };
+
+                    let right_node_ref = match upper[relative_upper_idx].1.as_mut() {
+                        Some(page) => page,
+                        None => return Err("Requested page does not exist for mid 8"),
+                    };
+
+                    return Ok((parent_node_ref, child_node_ref, right_node_ref));
+                } else {
+                    // upper == child
+                    let child_node_ref = match upper[relative_upper_idx].1.as_mut() {
+                        Some(page) => page,
+                        None => return Err("Requested page does not exist for mid 9"),
+                    };
+
+                    let right_node_ref = match lower[lower_idx].1.as_mut() {
+                        Some(page) => page,
+                        None => return Err("Requested page does not exist for mid 10"),
+                    };
+
+                    return Ok((parent_node_ref, child_node_ref, right_node_ref));
+                }
+            } else {
+                let parent_node_ref = match upper[relative_upper_idx].0.as_mut() {
+                    Some(page) => page,
+                    None => return Err("Requested page does not exist for parent 11"),
+                };
+
+                // if statement for child and right child is other
+                if lower_idx == child_page_num {
+                    let child_node_ref = match lower[lower_idx].1.as_mut() {
+                        Some(page) => page,
+                        None => return Err("Requested page does not exist for mid 12"),
+                    };
+
+                    let right_node_ref = match middle[relative_middle_idx].1.as_mut() {
+                        Some(page) => page,
+                        None => return Err("Requested page does not exist for mid 13"),
+                    };
+
+                    return Ok((parent_node_ref, child_node_ref, right_node_ref));
+                } else {
+                    // middle == child
+                    let child_node_ref = match middle[relative_middle_idx].1.as_mut() {
+                        Some(page) => page,
+                        None => return Err("Requested page does not exist for mid 14"),
+                    };
+
+                    let right_node_ref = match lower[lower_idx].1.as_mut() {
+                        Some(page) => page,
+                        None => return Err("Requested page does not exist for mid 15"),
+                    };
+
+                    return Ok((parent_node_ref, child_node_ref, right_node_ref));
+                }
+            };
+        } else {
+            panic!("How is right_child 0??");
         }
     }
 
@@ -266,22 +471,23 @@ impl Pager {
                     "{}- internal @page_num={} (num_childs: {})",
                     Self::indent(indent_level),
                     page_num,
-                    num_keys
+                    num_keys + 1
                 );
 
-                let mut child_nums: Vec<(u32, u32)> = vec![];
+                let mut child_nums: Vec<(i32, u32)> = vec![];
                 for i in 0..num_keys {
-                    // let child_num = node.get_child(i);
-                    // let key = node.cells[i as usize].0;
-                    child_nums.push(node.cells[i as usize]);
+                    let elem = node.cells[i as usize];
+                    child_nums.push((elem.0 as i32, elem.1));
                 }
-                child_nums.push((0, node.right_child));
+                child_nums.push((-1, node.right_child));
 
+                let mut index = 0;
                 for child in child_nums {
-                    let key = child.0;
+                    let key: i32 = child.0 as i32;
                     let num = child.1;
-                    info!("For key < {}", key);
+                    info!("Index: {} || key < {}", index, key);
                     self.print_b_tree(num as usize, indent_level + 1);
+                    index = index + 1;
                 }
             }
         }

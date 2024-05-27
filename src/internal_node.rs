@@ -73,15 +73,24 @@ impl InternalNode {
         table.pager.pages[left_child_page_num as usize] =
             (None, Some(Box::new(old_root_node.clone())));
 
-        let left_child_node = table
+        // let left_child_node = table
+        //     .pager
+        //     .get_page_leaf(left_child_page_num as usize)
+        //     .unwrap();
+
+        let (left_child_node, right_child_node) = table
             .pager
-            .get_page_leaf(left_child_page_num as usize)
+            .get_two_pages_leaf(left_child_page_num as usize, right_page_num as usize)
             .unwrap();
 
         left_child_node.is_root = false;
         let left_node_max_key = left_child_node.get_max_key();
 
+        left_child_node.parent = table.root_page_num;
+        right_child_node.parent = table.root_page_num;
+
         // make old root page num into internal node
+        table.pager.num_pages = table.pager.num_pages + 1;
         table.pager.pages[table.root_page_num as usize] =
             (Some(Box::new(InternalNode::new())), None);
         let new_root_node = table
@@ -94,6 +103,66 @@ impl InternalNode {
         // write child into cell for internal node
         new_root_node.cells[0] = (left_node_max_key, left_child_page_num);
         new_root_node.right_child = right_page_num;
+    }
+
+    pub fn update_internal_node_key(&mut self, old_max: u32, new_key: u32) {
+        let old_child_index = self.find_child_index(old_max);
+        let old_tuple = self.cells[old_child_index as usize];
+
+        self.cells[old_child_index as usize] = (new_key, old_tuple.1);
+    }
+
+    pub fn internal_node_insert(table: &mut Table, parent_page_num: usize, child_page_num: usize) {
+        let (parent, child, right_child) = table
+            .pager
+            .get_nodes_for_internal_node_insert(parent_page_num, child_page_num)
+            .unwrap();
+
+        let child_max_key = child.get_max_key();
+        let child_index = parent.find_child_index(child_max_key);
+
+        let original_num_keys = parent.num_keys;
+        parent.num_keys = original_num_keys + 1;
+
+        if original_num_keys as usize >= INTERNAL_NODE_MAX_CELLS {
+            panic!("NEED TO IMPLEMENT SPLITTING INTERNAL NODE!!");
+        }
+
+        let right_child_page_num = parent.right_child as usize;
+        let right_child_max_key = right_child.get_max_key();
+
+        // info!(
+        //     "child_max_key: {}, right_child_max_key: {}",
+        //     child_max_key, right_child_max_key
+        // );
+
+        if child_max_key > right_child_max_key {
+            // info!("Have to replace right child in parent internal node! Going to set right_child to {}", child_page_num);
+            // replace right child
+            parent.cells[original_num_keys as usize] =
+                (right_child_max_key, right_child_page_num as u32);
+            parent.right_child = child_page_num as u32;
+
+            // info!(
+            //     "setting index {} to {:?}",
+            //     original_num_keys,
+            //     (right_child_max_key, right_child_page_num as u32)
+            // );
+        } else {
+            // info!("looping from {}..={}.rev()", child_index, original_num_keys);
+
+            // make room for new cell
+            for i in (child_index..=original_num_keys).rev() {
+                // info!("setting index {} = {:?}", i, parent.cells[i as usize - 1]);
+                parent.cells[i as usize] = parent.cells[i as usize - 1];
+            }
+            parent.cells[child_index as usize] = (child_max_key, child_page_num as u32);
+            // info!(
+            //     "adding new node: setting index {} = {:?}",
+            //     child_index,
+            //     (child_max_key, child_page_num as u32)
+            // );
+        }
     }
 
     pub fn get_child(&self, child_num: u32) -> u32 {
@@ -109,29 +178,9 @@ impl InternalNode {
 
     pub fn node_find(table: &mut Table, page_num: u32, key: u32) -> Cursor {
         let node = table.pager.get_page_internal(page_num as usize).unwrap();
-        let num_keys = node.num_keys;
 
-        // perform binary search on keys to find what child we should use
-        let mut min_index = 0;
-        let mut max_index = num_keys;
-
-        while min_index != max_index {
-            let index = (min_index + max_index) / 2;
-            let key_to_right = node.cells[index as usize].0;
-
-            if key_to_right >= key {
-                max_index = index;
-            } else {
-                min_index = index + 1;
-            }
-        }
-
-        // // print out pairs of cells
-        // for i in 0..node.num_keys {
-        //     let tuple = node.cells[i as usize];
-        // }
-
-        let child_page_num = node.get_child(min_index);
+        let child_index = node.find_child_index(key);
+        let child_page_num = node.get_child(child_index);
 
         match table.pager.get_page_node_type(child_page_num as usize) {
             NodeType::Internal => {
@@ -143,6 +192,25 @@ impl InternalNode {
                 return LeafNode::node_find(table, child_page_num, key);
             }
         }
+    }
+
+    fn find_child_index(&self, key: u32) -> u32 {
+        // perform binary search on keys to find child index
+        let mut min_index = 0;
+        let mut max_index = self.num_keys;
+
+        while min_index != max_index {
+            let index = (min_index + max_index) / 2;
+            let key_to_right = self.cells[index as usize].0;
+
+            if key_to_right >= key {
+                max_index = index;
+            } else {
+                min_index = index + 1;
+            }
+        }
+
+        min_index
     }
 
     pub fn deserialize_node(node: &mut InternalNode, destination: *mut u8) {

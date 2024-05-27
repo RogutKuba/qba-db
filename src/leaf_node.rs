@@ -55,7 +55,7 @@ const LEAF_NODE_LEFT_SPLIT_COUNT: usize = (LEAF_NODE_MAX_CELLS + 1) - LEAF_NODE_
 #[derive(Clone)]
 pub struct LeafNode {
     pub is_root: bool,
-    pub parent_ptr: u32,
+    pub parent: u32,
     // leaf_format
     pub num_cells: u32,
     pub next_leaf: u32,
@@ -66,7 +66,7 @@ impl LeafNode {
     pub fn new() -> LeafNode {
         return LeafNode {
             is_root: false,
-            parent_ptr: 0,
+            parent: 0,
             next_leaf: 0,
             num_cells: 0,
             cells: [0; LEAF_NODE_SPACE_FOR_CELLS],
@@ -113,10 +113,10 @@ impl LeafNode {
                 IS_ROOT_SIZE,
             );
 
-            // pub parent_ptr: Option<*mut u8>,
-            // info!("writing parent_ptr");
+            // pub parent: Option<*mut u8>,
+            // info!("writing parent");
             ptr::copy_nonoverlapping(
-                &node.parent_ptr as *const _ as *const u8,
+                &node.parent as *const _ as *const u8,
                 destination.offset(PARENT_POINTER_OFFSET as isize) as *mut u8,
                 PARENT_POINTER_SIZE,
             );
@@ -166,12 +166,12 @@ impl LeafNode {
                 _ => panic!("Invalid boolean value"),
             };
 
-            // pub parent_ptr: Option<*mut u8>,
-            let parent_ptr_slice = std::slice::from_raw_parts(
+            // pub parent: Option<*mut u8>,
+            let parent_slice = std::slice::from_raw_parts(
                 source.offset(PARENT_POINTER_OFFSET as isize),
                 PARENT_POINTER_SIZE,
             );
-            let parent_ptr = u32::from_ne_bytes(parent_ptr_slice.try_into().unwrap());
+            let parent = u32::from_ne_bytes(parent_slice.try_into().unwrap());
 
             // pub num_cells: u32,
             let num_cells_slice = std::slice::from_raw_parts(
@@ -195,7 +195,7 @@ impl LeafNode {
             let cells: [u8; LEAF_NODE_SPACE_FOR_CELLS] = cells_slice.try_into().unwrap();
 
             dest.is_root = is_root;
-            dest.parent_ptr = parent_ptr;
+            dest.parent = parent;
             dest.num_cells = num_cells;
             dest.next_leaf = next_leaf;
             dest.cells = cells;
@@ -297,17 +297,17 @@ impl LeafNode {
         pager.ensure_page_leaf(old_page_num).unwrap();
         pager.ensure_page_leaf(new_page_num).unwrap();
 
-        if old_page_num >= new_page_num {
-            panic!("old page num is greater than new page num!");
-        }
-
         let (mut old_node, mut new_node) = pager
             .get_two_pages_leaf(old_page_num, new_page_num)
             .unwrap();
+        let old_max = old_node.get_max_key();
+
+        new_node.parent = old_node.parent;
+
+        info!("old_num: {}, new_num: {}", old_page_num, new_page_num);
 
         // start from right side of leaf node and move cells over to new node
         for i in (0..=LEAF_NODE_MAX_CELLS).rev() {
-            //
             let destination_node = {
                 if i >= LEAF_NODE_LEFT_SPLIT_COUNT {
                     &mut new_node
@@ -353,8 +353,19 @@ impl LeafNode {
         if old_node.is_root {
             return InternalNode::create_new_root_from_leaf(cursor.table, new_page_num as u32);
         } else {
-            // TODO:
-            info!("Need to implement setting parent after leafnode split");
+            let parent_page_num = old_node.parent;
+            let new_max = new_node.get_max_key();
+
+            let parent = pager.get_page_internal(parent_page_num as usize).unwrap();
+
+            parent.update_internal_node_key(old_max, new_max);
+            InternalNode::internal_node_insert(
+                cursor.table,
+                parent_page_num as usize,
+                new_page_num,
+            );
+
+            return;
         }
     }
 
